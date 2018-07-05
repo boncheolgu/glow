@@ -1,7 +1,7 @@
 
 cmake_minimum_required(VERSION 3.7)
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules" "${CMAKE_CURRENT_SOURCE_DIR}/external/flatbuffers/CMake")
 
 project(Glow C CXX)
 enable_testing()
@@ -72,7 +72,14 @@ if(NOT EXISTS "${GLOW_SOURCE_DIR}/tests/googletest/googletest")
   message(FATAL_ERROR "No git submodules. Run: git submodule update --init --recursive")
 endif()
 
+if(NOT EXISTS "${GLOW_SOURCE_DIR}/external/flatbuffers/include")
+  message(FATAL_ERROR "No git submodules. Run: git submodule update --init --recursive")
+endif()
+
 add_subdirectory(tests/googletest/)
+set(CMAKE_POLICY_DEFAULT_CMP0063 NEW)
+add_subdirectory(external/flatbuffers/)
+set(FLATBUFFERS_INCLUDE_DIR "${GLOW_SOURCE_DIR}/external/flatbuffers/include")
 
 add_subdirectory(lib)
 add_subdirectory(examples)

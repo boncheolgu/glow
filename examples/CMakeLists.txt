@@ -48,3 +48,13 @@ target_link_libraries(fr2en
                         IR
                         Quantization
                         Support)
+
+add_executable(tflite tflite.cpp)
+target_link_libraries(tflite
+                      PRIVATE
+                        Backends
+                        ExecutionEngine
+                        Graph
+                        Importer
+                        IR
+                        Support)
