@@ -101,12 +101,12 @@ protected:
   /// \returns the tensor that was registered under the name \p name.
   Tensor *getTensorByName(llvm::StringRef name);
 
-  /// Create a new variable \p name initialized with \p tensor.
-  /// The created variable is also registered under \p name.
-  /// \returns the newly created variable.
+  /// Create a new variable \p name initialized with \p tensor and load it.
+  /// The load is also registered under \p name.
+  /// \returns A load to the newly created variable.
   /// \pre !hasNodeByName(name)
   Node *createAndRememberVariable(
-      llvm::StringRef name, Tensor &tensor,
+      llvm::StringRef name, const Tensor &tensor,
       VisibilityKind visibilityKind = VisibilityKind::Private,
       Variable::TrainKind trainKind = Variable::TrainKind::Broadcast);
 
@@ -114,21 +114,29 @@ protected:
   /// if no node has been registered with this name.
   Node *getNodeByNameOrNull(llvm::StringRef name) const;
 
+  /// Create a new variable \p name initialized with \p tensor.
+  /// \returns the newly created variable.
+  Node *createVariable(
+      llvm::StringRef name, const Tensor &tensor,
+      VisibilityKind visibilityKind = VisibilityKind::Private,
+      Variable::TrainKind trainKind = Variable::TrainKind::Broadcast);
+
 public:
   /// \returns the node that was registered with the name \p name.
   /// \pre hasNodeByName(name)
   Node *getNodeByName(llvm::StringRef name) const;
 
   /// \returns the node that was registered with the name \p name or create a
-  /// new Variable node for a tensor with this name.
+  /// new Variable node for a tensor with this name and load it.
+  /// In case a new variable is returned, this method registers
+  /// the returned load node, not the variable itself.
+  /// Only save and load node are allowed to use variable directly.
   Node *getOrCreateVariableByName(llvm::StringRef name);
 
-  /// Create a new variable \p name initialized with \p tensor.
-  /// \returns the newly created variable.
-  Node *createVariable(
-      llvm::StringRef name, Tensor &tensor,
-      VisibilityKind visibilityKind = VisibilityKind::Private,
-      Variable::TrainKind trainKind = Variable::TrainKind::Broadcast);
+  /// \returns The variable referenced by the load registered
+  /// under \p name.
+  /// \pre isa<LoadNode>(getNodeByName(name))
+  Variable *getVariableByName(llvm::StringRef name) const;
 
   /// \returns True if the node that's registered using \p name exists.
   bool hasNodeByName(llvm::StringRef name) const;

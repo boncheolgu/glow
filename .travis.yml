@@ -19,8 +19,7 @@ addons:
 before_install:
   - utils/install_protobuf.sh
 
-matrix:
-  fast_finish: true
+jobs:
   include:
     - env:
         - TEST_NAME=ASAN
@@ -48,9 +47,11 @@ matrix:
         - utils/install_protobuf.sh
         - sudo apt-get install -y lcov
         - sudo pip install awscli --upgrade
+        - sudo apt-get install -qq g++-5
+        - sudo update-alternatives --install /usr/bin/gcov gcov /usr/bin/gcov-5 90
       install:
         - mkdir build && cd build
-        - cmake -G Ninja
+        - CC=gcc-5 CXX=g++-5 cmake -G Ninja
           -DCMAKE_BUILD_TYPE=Debug -DGLOW_WITH_OPENCL=OFF -DGLOW_WITH_CPU=OFF
           -DCMAKE_PREFIX_PATH=/usr/lib/llvm-6.0/include/
           -DGLOW_USE_COVERAGE=ON

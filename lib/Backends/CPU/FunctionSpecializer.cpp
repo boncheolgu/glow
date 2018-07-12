@@ -17,6 +17,7 @@
 
 #include "CPUBackend.h"
 #include "CommandLine.h"
+#include "LLVMIRGen.h"
 
 #include "glow/IR/Instrs.h"
 #include "glow/Support/Debug.h"
@@ -31,7 +32,6 @@ using namespace glow;
 using llvm::cast;
 using llvm::dyn_cast;
 using llvm::isa;
-using llvm::StringRef;
 
 namespace {
 /// Perform function specialization with constant arguments taking into account

@@ -27,67 +27,6 @@ using llvm::cast;
 namespace glow {
 namespace quantization {
 
-TensorQuantizationParams chooseQuantizationParams(float min, float max) {
-  assert(min <= max && "min must not be bigger than max");
-
-  // Given 8 bit precision.
-  const int32_t qmin = std::numeric_limits<int8_t>::min();
-  const int32_t qmax = std::numeric_limits<int8_t>::max();
-
-  // We extend the [min, max] interval to ensure that it contains 0.
-  // Otherwise, we would not meet the requirement that 0 be an exactly
-  // representable value.
-  min = std::min(min, 0.f);
-  max = std::max(max, 0.f);
-
-  double scale = (max - min) / ((double)qmax - qmin);
-
-  // Dequantization uses the following formula scale * (X - offset), so
-  // scale should not be equal to zero.
-  // If scale is 0, we arbitrary adjust the scale to 0.1.
-  if (scale == 0)
-    scale = 0.1;
-
-  assert(scale > 0 && "Scale must be non negative");
-
-  // Zero-point computation.
-  // First the initial floating-point computation. The zero-point can be
-  // determined from solving an affine equation for any known pair
-  // (real value, corresponding quantized value).
-  // We know two such pairs: (rmin, qmin) and (rmax, qmax).
-  // The arithmetic error on the zero point computed from either pair
-  // will be roughly machine_epsilon * (sum of absolute values of terms)
-  // so we want to use the variant that adds the smaller terms.
-  double zeroPointFromMin = qmin - min / scale;
-  double zeroPointFromMax = qmax - max / scale;
-  double zeroPointFromMinError = std::abs(qmin) + std::abs(min / scale);
-  double zeroPointFromMaxError = std::abs(qmax) + std::abs(max / scale);
-  double initialZeroPoint = zeroPointFromMinError < zeroPointFromMaxError
-                                ? zeroPointFromMin
-                                : zeroPointFromMax;
-
-  // For symmetric quantization, if min == -max, force the zero point to be 0.
-  if (min == -max) {
-    initialZeroPoint = 0;
-  }
-
-  // Now we need to nudge the zero point to be an integer (our zero points are
-  // integer, and this is motivated by the requirement to be able to represent
-  // the real value "0" exactly as a quantized value, which is required in
-  // multiple places, for example in Im2col with SAME padding).
-  int32_t nudgedZeroPoint = 0;
-  if (initialZeroPoint < qmin) {
-    nudgedZeroPoint = qmin;
-  } else if (initialZeroPoint > qmax) {
-    nudgedZeroPoint = qmax;
-  } else {
-    nudgedZeroPoint = static_cast<int32_t>(round(initialZeroPoint));
-  }
-
-  TensorQuantizationParams result{static_cast<float>(scale), nudgedZeroPoint};
-  return result;
-}
-
 std::vector<NodeQuantizationInfo>
 generateNodeQuantizationInfos(const Function *F) {
   std::vector<NodeQuantizationInfo> quantizationInfos;
@@ -139,7 +78,7 @@ quantizeInputs(Function *F, Node *node,
 
     const TensorQuantizationParams &TQP =
         nodeToTQP.find(nodeOutputName)->second;
-    auto QT = F->getParent()->uniqueType(ElemKind::Int8QTy, NV->dims(),
+    auto QT = F->getParent()->uniqueType(ElemKind::Int8QTy, NV.dims(),
                                          TQP.scale_, TQP.offset_);
 
     Node *quantizeNode = F->createQuantize("quantize", NV, QT);
@@ -195,7 +134,7 @@ static Node *quantizeNode(Function *F, Node *node,
     assert(quantizedInputs.size() == 3 && "Invalid number of inputs");
     assert(qParams.size() == 1 && "Invalid number of quantized outputs");
     auto QT =
-        F->getParent()->uniqueType(ElemKind::Int8QTy, FC->getResult()->dims(),
+        F->getParent()->uniqueType(ElemKind::Int8QTy, FC->getResult().dims(),
                                    qParams[0].scale_, qParams[0].offset_);
     quantizedNode =
         F->createFullyConnected(FC->getName(), quantizedInputs[0],
@@ -208,7 +147,7 @@ static Node *quantizeNode(Function *F, Node *node,
     assert(quantizedInputs.size() == 3 && "Invalid number of inputs");
     assert(qParams.size() == 1 && "Invalid number of quantized outputs");
     auto QT =
-        F->getParent()->uniqueType(ElemKind::Int8QTy, CV->getResult()->dims(),
+        F->getParent()->uniqueType(ElemKind::Int8QTy, CV->getResult().dims(),
                                    qParams[0].scale_, qParams[0].offset_);
     quantizedNode =
         F->createConv(CV->getName(), quantizedInputs[0], quantizedInputs[1],
@@ -222,7 +161,7 @@ static Node *quantizeNode(Function *F, Node *node,
     assert(qParams.size() == 1 && "Invalid number of quantized outputs");
 
     auto QT = F->getParent()->uniqueType(
-        ElemKind::Int8QTy, S->getResult()->dims(),
+        ElemKind::Int8QTy, S->getResult().dims(),
         quantizedInputs[0]->getNthResult(0).getType()->getScale(),
         quantizedInputs[0]->getNthResult(0).getType()->getOffset());
 
@@ -300,7 +239,7 @@ static Node *quantizeNode(Function *F, Node *node,
     // same {S,O} params.
     for (size_t qi = 0, e = quantizedInputs.size(); qi < e; qi++) {
       auto argOutTy = F->getParent()->uniqueType(
-          ElemKind::Int8QTy, quantizedInputs[qi]->dims(), qParams[0].scale_,
+          ElemKind::Int8QTy, quantizedInputs[qi].dims(), qParams[0].scale_,
           qParams[0].offset_);
 
       quantizedInputs[qi] = F->createRescaleQuantized(
@@ -308,7 +247,7 @@ static Node *quantizeNode(Function *F, Node *node,
     }
 
     auto outTy =
-        F->getParent()->uniqueType(ElemKind::Int8QTy, C->getResult()->dims(),
+        F->getParent()->uniqueType(ElemKind::Int8QTy, C->getResult().dims(),
                                    qParams[0].scale_, qParams[0].offset_);
     quantizedNode =
         F->createConcat(node->getName(), quantizedInputs, C->getDim(), outTy);
@@ -336,59 +275,23 @@ static Node *quantizeNode(Function *F, Node *node,
     break;
   }
   case Kinded::Kind::TanhNodeKind: {
+    auto *TN = cast<TanhNode>(node);
     assert(quantizedInputs.size() == 1 && "Invalid number of inputs");
+    assert(qParams.size() == 1 && "Invalid number of quantized outputs");
 
-    // Quantized tanh operator expects input to be in a certain floating point
-    // range. This operator works based on the precomputed table and has to
-    // process input in a range of [-3.0, 3.0]. Tanh asymptotically approaches
-    // +/-1.0 and is already +/-.995 at +/-3.0.
-    // The output quantization parameters are chosen to represent the floating
-    // point range of [-1.0, 1.0].
-    auto inputQuantizationParams = chooseQuantizationParams(-3.0, 3.0);
-    auto tanhInTy = F->getParent()->uniqueType(
-        ElemKind::Int8QTy, quantizedInputs[0]->dims(),
-        inputQuantizationParams.scale_, inputQuantizationParams.offset_);
-
-    // Make sure input is clipped in [-3.0, 3.0] floating point range.
-    auto *rescaleNode = F->createRescaleQuantized(quantizedInputs[0]->getName(),
-                                                  quantizedInputs[0], tanhInTy);
-
-    // Make sure output is clipped in [-1.0, 1.0] floating point range.
-    auto outputQuantizationParams = chooseQuantizationParams(-1.0, 1.0);
-    auto resultOutTy = F->getParent()->uniqueType(
-        ElemKind::Int8QTy, rescaleNode->getResult().dims(),
-        outputQuantizationParams.scale_, outputQuantizationParams.offset_);
-
-    quantizedNode = F->createIntTanh(node->getName(), rescaleNode, resultOutTy);
+    // Note: This should either be lowered into an IntLookupTable, or
+    // implemented via a backend-specific Node/Inst.
+    quantizedNode = F->createTanh(TN->getName(), quantizedInputs[0]);
     break;
   }
   case Kinded::Kind::SigmoidNodeKind: {
+    auto *SN = cast<SigmoidNode>(node);
     assert(quantizedInputs.size() == 1 && "Invalid number of inputs");
+    assert(qParams.size() == 1 && "Invalid number of quantized outputs");
 
-    // Quantized sigmoid operator expects input to be in a certain floating
-    // point range. This operator works based on the precomputed table and has
-    // to process input in a range of [-6.0, 6.0]. Sigmoid asymptotically
-    // approaches 0 at -inf and 1 at +inf. It has values of 0.00247262 and
-    // 0.997527 at -6.0 and 6.0 correspondingly. The output quantization
-    // parameters are chosen to represent the floating point range of [0, 1.0].
-    auto inputQuantizationParams = chooseQuantizationParams(-6.0, 6.0);
-    auto sigmoidInTy = F->getParent()->uniqueType(
-        ElemKind::Int8QTy, quantizedInputs[0]->dims(),
-        inputQuantizationParams.scale_, inputQuantizationParams.offset_);
-
-    // Make sure input is clipped in [-6.0, 6.0] floating point range.
-    auto *rescaleNode = F->createRescaleQuantized(
-        quantizedInputs[0]->getName(), quantizedInputs[0], sigmoidInTy);
-
-    // Make sure output is clipped in [0.0, 1.0] floating point range.
-    auto outputQuantizationParams = chooseQuantizationParams(0.0, 1.0);
-    auto resultOutTy = F->getParent()->uniqueType(
-        ElemKind::Int8QTy, rescaleNode->getResult().dims(),
-        outputQuantizationParams.scale_, outputQuantizationParams.offset_);
-
-    quantizedNode =
-        F->createIntSigmoid(node->getName(), rescaleNode, resultOutTy);
-
+    // Note: This should either be lowered into an IntLookupTable, or
+    // implemented via a backend-specific Node/Inst.
+    quantizedNode = F->createSigmoid(SN->getName(), quantizedInputs[0]);
     break;
   }
   default:
@@ -437,7 +340,7 @@ postProcessQuantizedNode(Function *F, Node *quantizedNode,
     // {S,O} as the input. Make sure that rescale is applied to comply with
     // the taken profile from the node.
     auto outTy =
-        F->getParent()->uniqueType(ElemKind::Int8QTy, quantizedNode->dims(),
+        F->getParent()->uniqueType(ElemKind::Int8QTy, quantizedNode->dims(0),
                                    qParams[0].scale_, qParams[0].offset_);
     return F->createRescaleQuantized(quantizedNode->getName(), quantizedNode,
                                      outTy);

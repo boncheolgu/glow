@@ -20,6 +20,7 @@
 
 #include "gtest/gtest.h"
 
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Casting.h"
 
 using namespace glow;
@@ -127,13 +128,25 @@ TEST_P(BackendTest, simpleInference) {
 
   EE_.compile(CompilationMode::Infer, F);
 
-  /// Add a debug_action instruction to check that it can be
-  /// processed by the interpreter.
-  auto &M = EE_.getIR();
-  IRBuilder builder(&M);
-  builder.createDebugPrintInst("print1", *M.getWeights().begin());
-
   EE_.run({input}, {&inputs});
+}
+
+TEST_P(BackendTest, debugPrint) {
+  Tensor input{0.0, 1.0, 2.0, 3.0};
+  Module mod;
+  Function *F = mod.createFunction("main");
+  auto *IV =
+      mod.createVariable(&input.getType(), "input", VisibilityKind::Public,
+                         Variable::TrainKind::None);
+  IV->copyFrom(&input);
+
+  auto IR = llvm::make_unique<IRFunction>(F);
+  IR->generateIR();
+  IRBuilder(IR.get()).createDebugPrintInst("print", *IR->getWeights().begin());
+
+  std::unique_ptr<Backend> backend(createBackend(GetParam()));
+  backend->init(std::move(IR));
+  backend->doForwardPass();
 }
 
 INSTANTIATE_TEST_CASE_P(Interpreter, BackendTest,

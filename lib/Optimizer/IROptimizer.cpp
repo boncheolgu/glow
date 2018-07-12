@@ -62,7 +62,7 @@ struct Interval {
   /// Index of the interval end. Typically, it is the last use of the current
   /// value held in the buffer.
   size_t end_;
-  /// True if the value may change between begin and end, e.g.
+  /// True if the value does not change between begin and end, e.g.
   /// due to @inout use. In most cases, the value does not change for the
   /// duration of a single live interval.
   bool sameValue_{true};
@@ -664,7 +664,7 @@ static Intervals::iterator getEnclosingInterval(Intervals &liveIntervals,
 
 /// Returns true if RHS is enclosed inside LHS.
 static bool isEnclosedInside(Interval &lhs, Interval &rhs) {
-  return lhs.begin_ < rhs.begin_ && rhs.end_ <= lhs.end_;
+  return lhs.begin_ <= rhs.begin_ && rhs.end_ <= lhs.end_;
 }
 
 /// \returns true of any intervals from \p Ints overlap with interval \p I.
@@ -781,24 +781,6 @@ static void eraseInstructions(IRFunction &M,
 /// outside.
 static bool isObservable(Value *V) { return isa<WeightVar>(getOrigin(V)); }
 
-/// Substitute all uses of \p oldBuffer by \p newBuffer inside the
-/// \p oldInterval.
-static void reuseBufferInsideInterval(
-    Value *oldBuffer, Value *newBuffer, Interval oldInterval, IRFunction &M,
-    const LiveIntervalsInstructionNumbering &instrNumbering,
-    Intervals &oldIntervals, Intervals &newIntervals) {
-  DEBUG_GLOW(llvm::dbgs() << "\n\nReuse buffers: use buffer of "
-                          << newBuffer->getName() << " as a buffer for "
-                          << oldBuffer->getName() << "\n"
-                          << "in live interval " << oldInterval << "\n");
-  // Replace oldBuffer with newBuffer.
-  replaceAllUsesInsideIntervalWith(oldBuffer, newBuffer, oldInterval, M,
-                                   instrNumbering);
-  // oldInterval does not belong to oldIntervals anymore. It should belong
-  // to newIntervals now.
-  moveInterval(oldIntervals, newIntervals, oldInterval);
-}
-
 /// A helper class for performing a sharing of buffers used by a given
 /// instruction.
 class BufferSharingOptimizer {
@@ -830,6 +812,18 @@ class BufferSharingOptimizer {
   /// instruction.
   Interval *destInterval_;
 
+  /// Check if instr_ is a copy propagation.
+  /// That is, instr_ is a copy and both the source and destination
+  /// are not redefined on the related intervals.
+  /// Intervals are split at each definition, expect for inout.
+  /// Thus redefinitions could only happen when a value is redefined by
+  /// inout operands or some partial write.
+  /// This is tracked by the sameValue_ field on each interval.
+  bool isCopyPropagation() const {
+    return isa<CopyInst>(instr_) && srcInterval_->sameValue_ &&
+           destInterval_->sameValue_;
+  }
+
   /// Pick the buffer that can be reused. To make a decision, check
   /// which intervals intersect with each other. In most cases, the buffers
   /// can be combined if their live intervals do not overlap.
@@ -851,14 +845,12 @@ class BufferSharingOptimizer {
     // A value X cannot reuse the buffer of another value Y,
     // if the live interval of X overlaps with any live intervals of Y.
     // The only exception is the copy instruction, where the live interval
-    // of the destination may be enclosed into a live interval of the source,
-    // because they have the same value.
-    bool canCopyPropagate = isa<CopyInst>(instr_) &&
-                            isEnclosedInside(*srcInterval_, *destInterval_) &&
-                            srcInterval_->sameValue_;
+    // of the destination may be merged into a live interval of the source
+    // if they have the same value.
+
     // If dest interval overlaps with any srcIntervals, it cannot be replaced.
     bool destIntvalCannotBeReplaced =
-        !canCopyPropagate &&
+        !isCopyPropagation() &&
         hasOverlappingIntervals(srcIntervals_, *destInterval_);
     // If src interval overlaps with any dest Intervals, it cannot be replaced.
     bool srcIntervalCannotBeReplaced =
@@ -981,15 +973,42 @@ public:
     if (bufferToReuse == destOrigin_) {
       // This operation may extend the lifetime of dest's buffer.
       // shareBuffers will fix it once it's done.
-      reuseBufferInsideInterval(srcOrigin_, dest_, *srcInterval_, M_,
-                                instrNumbering_, srcIntervals_, destIntervals_);
+      reuseBufferInsideInterval(srcOrigin_, dest_, *srcInterval_,
+                                *destInterval_, M_, srcIntervals_,
+                                destIntervals_);
       return true;
     }
 
     // Source buffer can be reused.
-    reuseBufferInsideInterval(destOrigin_, src_, *destInterval_, M_,
-                              instrNumbering_, destIntervals_, srcIntervals_);
+    reuseBufferInsideInterval(destOrigin_, src_, *destInterval_, *srcInterval_,
+                              M_, destIntervals_, srcIntervals_);
     return true;
+  }
+
+  /// Substitute all uses of \p oldBuffer by \p newBuffer inside the
+  /// \p oldInterval.
+  void reuseBufferInsideInterval(Value *oldBuffer, Value *newBuffer,
+                                 Interval oldInterval, Interval &newInterval,
+                                 IRFunction &M, Intervals &oldIntervals,
+                                 Intervals &newIntervals) {
+    DEBUG_GLOW(llvm::dbgs()
+               << "\n\nReuse buffers: use buffer of " << newBuffer->getName()
+               << " as a buffer for " << oldBuffer->getName() << "\n"
+               << "in live interval " << oldInterval << "\n");
+    // Replace oldBuffer with newBuffer.
+    replaceAllUsesInsideIntervalWith(oldBuffer, newBuffer, oldInterval, M,
+                                     instrNumbering_);
+    if (isCopyPropagation()) {
+      // This is a copy propagation.
+      // Merge the old interval with the new one.
+      newInterval.begin_ = std::min(newInterval.begin_, oldInterval.begin_);
+      newInterval.end_ = std::max(newInterval.end_, oldInterval.end_);
+      assert(isEnclosedInside(newInterval, oldInterval) &&
+             "Merging the intervals didn't work");
+    }
+    // oldInterval does not belong to oldIntervals anymore. It should belong
+    // to newIntervals now.
+    moveInterval(oldIntervals, newIntervals, oldInterval);
   }
 };
 

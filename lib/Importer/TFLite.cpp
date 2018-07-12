@@ -64,10 +64,10 @@ Conv2DParams getConv2DParams(const Node *input, const Node *filter,
                              const tflite::Conv2DOptions *options) {
   GLOW_ASSERT(options->stride_w() == options->stride_h());
 
-  const auto filter_shape = ShapeNHWC{filter->dims()};
+  const auto filter_shape = ShapeNHWC{filter->dims(0)};
   GLOW_ASSERT(filter_shape.h == filter_shape.w);
 
-  const auto input_shape = ShapeNHWC{input->dims()};
+  const auto input_shape = ShapeNHWC{input->dims(0)};
 
   switch (options->padding()) {
   case tflite::Padding_SAME: {
@@ -99,10 +99,10 @@ Conv2DParams getConv2DParams(const Node *input, const Node *filter,
                              const tflite::DepthwiseConv2DOptions *options) {
   GLOW_ASSERT(options->stride_w() == options->stride_h());
 
-  const auto filter_shape = ShapeNHWC{filter->dims()};
+  const auto filter_shape = ShapeNHWC{filter->dims(0)};
   GLOW_ASSERT(filter_shape.h == filter_shape.w);
 
-  const auto input_shape = ShapeNHWC{input->dims()};
+  const auto input_shape = ShapeNHWC{input->dims(0)};
 
   switch (options->padding()) {
   case tflite::Padding_SAME: {

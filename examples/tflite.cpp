@@ -34,11 +34,6 @@ llvm::cl::opt<string> modelFile(
     llvm::cl::desc(
         "Specify the file to import TFLite models in Flatbuffer format"),
     llvm::cl::value_desc("file.tflite"), llvm::cl::cat(tfliteCat));
-llvm::cl::opt<bool> dumpIrOpt("dumpIR", llvm::cl::desc("Prints IR to stdout"),
-                              llvm::cl::cat(tfliteCat));
-llvm::cl::opt<bool> dumpDagOpt("dumpDAG",
-                               llvm::cl::desc("Render DAG to \"dag.dot\""),
-                               llvm::cl::cat(tfliteCat));
 } // namespace
 
 unsigned loadMNIST(Tensor &imageInputs, Tensor &labelInputs) {
@@ -101,15 +96,9 @@ int main(int argc, char **argv) {
 
   auto F = mod.createFunction("main");
   TFLiteLoader LD(modelFile.c_str(), {}, {}, *F);
-  if (dumpDagOpt) {
-    F->dumpDAG("dag.dot");
-  }
 
   // Make sure that graph can be compiled and run.
   EE.compile(CompilationMode::Infer, F);
-  if (dumpIrOpt) {
-    EE.getIR().dump();
-  }
 
   auto LIH = labelInputs.getHandle<size_t>();
 

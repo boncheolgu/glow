@@ -17,10 +17,10 @@
 #ifndef GLOW_QUANTIZATION_BASE_BASE_H
 #define GLOW_QUANTIZATION_BASE_BASE_H
 
-#include <cstdlib>
-#include <cassert>
-#include <limits>
 #include <algorithm>
+#include <cassert>
+#include <cstdlib>
+#include <limits>
 
 namespace glow {
 
@@ -80,6 +80,10 @@ template <class SrcTy, class DestTy> DestTy clip(SrcTy in) {
 /// \returns transformation parameters.
 QuantizationTransform32To8 quantizeScaleOffset32To8(float scale,
                                                     int32_t offset);
+
+/// Calculate TensorQuantizationParams based on the clipped \p min and \p max
+/// floating point range.
+TensorQuantizationParams chooseQuantizationParams(float min, float max);
 
 } // namespace quantization
 } // namespace glow

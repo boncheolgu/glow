@@ -13,20 +13,21 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#ifndef GLOW_BACKENDS_COMPILEDFUNCTION_H
+#define GLOW_BACKENDS_COMPILEDFUNCTION_H
 
-#ifdef GLOW_WITH_OPENCL
+namespace glow {
 
-void OCLConvolutionNode::verify() const {
-  ShapeNCHW idim(getInput().getType()->dims());
-  ShapeNCHW odim(getResult().getType()->dims());
-  auto outSz = calculateConvOutputDims(idim.h, idim.w, getKernel(), getStride(),
-                                       getPads());
-  ShapeNCHW exp(idim.n, getBias().dims()[0], outSz.first, outSz.second);
-  (void)exp;
-  assert(exp == odim && "Invalid output dimensions");
-}
+/// Interface for executing a compiled function.
+class CompiledFunction {
+public:
+  /// Dtor.
+  virtual ~CompiledFunction() = default;
 
-void OCLPoolAvgNode::verify() const {}
+  /// Execute the network.
+  virtual void doForwardPass() = 0;
+};
 
-void OCLPoolMaxNode::verify() const {}
-#endif // GLOW_WITH_OPENCL
+} // end namespace glow
+
+#endif // GLOW_BACKENDS_COMPILEDFUNCTION_H

@@ -249,13 +249,13 @@ public:
     case glow::Kinded::Kind::ConcatNodeKind: {
       auto *CC = cast<ConcatNode>(N);
 
-      auto *dest =
-          builder_.createAllocActivationInst(CC->getName(), CC->getResult().getType());
+      auto *dest = builder_.createAllocActivationInst(
+          CC->getName(), CC->getResult().getType());
       builder_.createSplatInst(CC->getName(), dest, 0);
       auto inputs = CC->getInputs();
 
       // We start inserting to the shape at (0,0, ... ).
-      std::vector<size_t> offsets(CC->dims().size(), 0);
+      std::vector<size_t> offsets(CC->getResult().dims().size(), 0);
       unsigned dim = CC->getDim();
 
       for (size_t i = 0, e = inputs.size(); i < e;) {
@@ -287,8 +287,8 @@ public:
       auto *SL = cast<SliceNode>(N);
       auto start = SL->getStart();
       auto *in = valueForNode(SL->getInput());
-      auto *dest =
-          builder_.createAllocActivationInst(SL->getName(), SL->getResult().getType());
+      auto *dest = builder_.createAllocActivationInst(
+          SL->getName(), SL->getResult().getType());
       builder_.createExtractTensorInst(SL->getName(), dest, in, start);
       registerIR(N, dest);
       break;
@@ -298,8 +298,8 @@ public:
       auto start = IT->getStart();
       auto *big = valueForNode(IT->getBig());
       auto *small = valueForNode(IT->getSmall());
-      auto *dest =
-          builder_.createAllocActivationInst(IT->getName(), IT->getResult().getType());
+      auto *dest = builder_.createAllocActivationInst(
+          IT->getName(), IT->getResult().getType());
       builder_.createCopyInst("copy.insert", dest, big);
       builder_.createInsertTensorInst("insert", dest, small, start,
                                       /* count */ 1, /* axis */ 0);
@@ -312,8 +312,8 @@ public:
       auto *dataTensor = valueForNode(SAI->getData());
       auto *indicesTensor = valueForNode(SAI->getIndices());
       auto *slicesTensor = valueForNode(SAI->getSlices());
-      auto *dest =
-          builder_.createAllocActivationInst(SAI->getName(), SAI->getResult().getType());
+      auto *dest = builder_.createAllocActivationInst(
+          SAI->getName(), SAI->getResult().getType());
       builder_.createCopyInst("copy.scatterassign", dest, dataTensor);
       builder_.createScatterAssignInst("scatterassign", dest, indicesTensor,
                                        slicesTensor);
@@ -366,8 +366,8 @@ public:
     case glow::Kinded::Kind::LoadNodeKind: {
       auto *load = cast<LoadNode>(N);
       auto *src = valueForNode(load->getVariable());
-      auto *dest =
-          builder_.createAllocActivationInst(load->getName(), load->getResult().getType());
+      auto *dest = builder_.createAllocActivationInst(
+          load->getName(), load->getResult().getType());
       auto *copy = builder_.createCopyInst("load", dest, src);
       copy->setName(N->getName());
       registerIR(N, dest);

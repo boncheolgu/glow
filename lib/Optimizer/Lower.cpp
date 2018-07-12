@@ -19,6 +19,7 @@
 #include "glow/Graph/Node.h"
 #include "glow/Graph/Nodes.h"
 #include "glow/Optimizer/Optimizer.h"
+#include "glow/Quantization/Base/Base.h"
 
 #include "llvm/Support/Casting.h"
 
@@ -188,6 +189,72 @@ void lowerReluNode(Function *F, ReluNode &R) {
   R.getResult().replaceAllUsesOfWith(relu);
 }
 
+void lowerQuantizedTanhNode(Function *F, TanhNode *TN) {
+  // Quantized tanh operator expects input to be in a certain floating point
+  // range. This operator works based on the precomputed table and has to
+  // process input in a range of [-3.0, 3.0]. Tanh asymptotically approaches
+  // +/-1.0 and is already +/-.995 at +/-3.0.
+  // The output quantization parameters are chosen to represent the floating
+  // point range of [-1.0, 1.0].
+  auto inputQuantizationParams =
+      glow::quantization::chooseQuantizationParams(-3.0, 3.0);
+  auto tanhInTy = F->getParent()->uniqueType(
+      ElemKind::Int8QTy, TN->getResult().dims(), inputQuantizationParams.scale_,
+      inputQuantizationParams.offset_);
+
+  // Make sure input is clipped in [-3.0, 3.0] floating point range.
+  auto *rescaleInputNode =
+      F->createRescaleQuantized(TN->getName(), TN->getInput(), tanhInTy);
+
+  // Make sure output is clipped in [-1.0, 1.0] floating point range.
+  auto outputQuantizationParams =
+      glow::quantization::chooseQuantizationParams(-1.0, 1.0);
+  auto resultOutTy = F->getParent()->uniqueType(
+      ElemKind::Int8QTy, rescaleInputNode->getResult().dims(),
+      outputQuantizationParams.scale_, outputQuantizationParams.offset_);
+
+  auto *quantizedNode =
+      F->createIntTanh(TN->getName(), rescaleInputNode, resultOutTy);
+
+  auto *rescaleOutputNode = F->createRescaleQuantized(
+      TN->getName(), quantizedNode, TN->getResult().getType());
+
+  TN->getResult().replaceAllUsesOfWith(rescaleOutputNode);
+}
+
+void lowerQuantizedSigmoidNode(Function *F, SigmoidNode *SN) {
+  // Quantized sigmoid operator expects input to be in a certain floating
+  // point range. This operator works based on the precomputed table and has
+  // to process input in a range of [-6.0, 6.0]. Sigmoid asymptotically
+  // approaches 0 at -inf and 1 at +inf. It has values of 0.00247262 and
+  // 0.997527 at -6.0 and 6.0 correspondingly. The output quantization
+  // parameters are chosen to represent the floating point range of [0, 1.0].
+  auto inputQuantizationParams =
+      glow::quantization::chooseQuantizationParams(-6.0, 6.0);
+  auto sigmoidInTy = F->getParent()->uniqueType(
+      ElemKind::Int8QTy, SN->getResult().dims(), inputQuantizationParams.scale_,
+      inputQuantizationParams.offset_);
+
+  // Make sure input is clipped in [-6.0, 6.0] floating point range.
+  auto *rescaleInputNode =
+      F->createRescaleQuantized(SN->getName(), SN->getInput(), sigmoidInTy);
+
+  // Make sure output is clipped in [0.0, 1.0] floating point range.
+  auto outputQuantizationParams =
+      glow::quantization::chooseQuantizationParams(0.0, 1.0);
+  auto resultOutTy = F->getParent()->uniqueType(
+      ElemKind::Int8QTy, rescaleInputNode->getResult().dims(),
+      outputQuantizationParams.scale_, outputQuantizationParams.offset_);
+
+  auto *quantizedNode =
+      F->createIntSigmoid(SN->getName(), rescaleInputNode, resultOutTy);
+
+  auto *rescaleOutputNode = F->createRescaleQuantized(
+      SN->getName(), quantizedNode, SN->getResult().getType());
+
+  SN->getResult().replaceAllUsesOfWith(rescaleOutputNode);
+}
+
 void lowerSGDNode(Function *F, SGDNode &SGD) {
   assert(SGD.getUsers().size() == 0 && "SGDNode must not have users");
 
@@ -328,7 +395,7 @@ void computeBatchNormalizationWeights(Function *F, BatchNormalizationNode &BN) {
   }
   // Reshape input tensor to form:
   // {samplesPerChannel, numChannels}
-  Node *inFlat =
+  ReshapeNode *inFlat =
       F->createReshape("in.flat", inPrep, {samplesPerChannel, numChannels});
 
   // Calculate Mean:
@@ -337,14 +404,16 @@ void computeBatchNormalizationWeights(Function *F, BatchNormalizationNode &BN) {
   // reduce the tensor by the first dimension, to get {numChannels}
   auto *batchedAdd = F->createBatchedReduceAdd("in.sum", inFlat, /* axis */ 0);
   // Mean = sum(in[i]) / N
-  auto samplesPerChannelSplat = F->createSplat(
-      "samplesPerChannelSplat", batchedAdd->getResult().getType(), samplesPerChannel);
-  DivNode *localMean = F->createDiv("localMean", batchedAdd, samplesPerChannelSplat);
+  auto samplesPerChannelSplat =
+      F->createSplat("samplesPerChannelSplat",
+                     batchedAdd->getResult().getType(), samplesPerChannel);
+  DivNode *localMean =
+      F->createDiv("localMean", batchedAdd, samplesPerChannelSplat);
 
   // Calculate Variance:
   // sum((x - mu) ^ 2)
-  auto localMeanB =
-      F->createBroadcast("new_mean_broadcasted", localMean, inFlat->dims(), 1);
+  auto localMeanB = F->createBroadcast("new_mean_broadcasted", localMean,
+                                       inFlat->getResult().dims(), 1);
 
   Node *localVar = F->createSub("x_mu", inFlat, localMeanB);
   localVar = F->createPow("x_mu2", localVar, 2);
@@ -353,8 +422,8 @@ void computeBatchNormalizationWeights(Function *F, BatchNormalizationNode &BN) {
   localVar = F->createDiv("localVar", localVar, samplesPerChannelSplat);
 
   // Update the global variance and mean:
-  auto momentumSplat =
-      F->createSplat("momentumSplat", localMean->getResult().getType(), momentum);
+  auto momentumSplat = F->createSplat(
+      "momentumSplat", localMean->getResult().getType(), momentum);
   auto oneMinusMomentumSplat = F->createSplat(
       "oneMinusMomentumSplat", localMean->getResult().getType(), 1 - momentum);
 
@@ -505,8 +574,8 @@ void lowerGroupConvolutionNode(Function *F, ConvolutionNode &BNG) {
 
   auto outDims = BNG.getResult().dims().vec();
   outDims[3] = outCperG;
-  auto outTy = F->getParent()->uniqueTypeWithNewShape(
-      BNG.getResult().getType(), outDims);
+  auto outTy = F->getParent()->uniqueTypeWithNewShape(BNG.getResult().getType(),
+                                                      outDims);
 
   std::vector<NodeValue> convs;
   for (unsigned groupId = 0; groupId < group; groupId++) {
@@ -568,6 +637,14 @@ void glow::lower(Function *F, CompilationMode mode, const Backend &B) {
     } else if (auto *CN = dyn_cast<ConvolutionNode>(node)) {
       if (CN->getGroup() > 1)
         lowerGroupConvolutionNode(F, *CN);
+    } else if (auto *SN = dyn_cast<SigmoidNode>(node)) {
+      if (SN->getResult().getType()->isQuantizedType()) {
+        lowerQuantizedSigmoidNode(F, SN);
+      }
+    } else if (auto *TN = dyn_cast<TanhNode>(node)) {
+      if (TN->getResult().getType()->isQuantizedType()) {
+        lowerQuantizedTanhNode(F, TN);
+      }
     }
   }
 
