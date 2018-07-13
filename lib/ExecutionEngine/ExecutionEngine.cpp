@@ -38,24 +38,20 @@ static llvm::cl::opt<bool> dumpIR("dump-ir",
                                   llvm::cl::desc("Prints IR to stdout"));
 } // namespace
 
-ExecutionEngine::ExecutionEngine(BackendKind backendKind) {
-  backendKind_ = backendKind;
-  M_.reset(new Module());
-  backend_.reset(createBackend(backendKind_));
-}
+ExecutionEngine::ExecutionEngine(BackendKind backendKind)
+    : backend_(createBackend(backendKind)) {}
 
 // Set the code generator kind to \p backendKind.
 void ExecutionEngine::setBackend(BackendKind backendKind) {
-  backendKind_ = backendKind;
   backend_.reset(createBackend(backendKind));
+  function_.reset();
 }
-
-void ExecutionEngine::reset() { backend_.reset(createBackend(backendKind_)); }
 
 ExecutionEngine::~ExecutionEngine() = default;
 
 void ExecutionEngine::run(llvm::ArrayRef<Variable *> vars,
                           llvm::ArrayRef<Tensor *> inputs) {
+  assert(function_ && "No function has been compiled");
   assert(inputs.size() == vars.size() &&
          "The number of inputs does not match the number of variables");
 
@@ -66,7 +62,7 @@ void ExecutionEngine::run(llvm::ArrayRef<Variable *> vars,
     loadValueFromTensor(vars[i], inputs[i]);
   }
 
-  backend_->doForwardPass();
+  function_->execute();
 }
 
 void ExecutionEngine::runBatch(size_t iterations,
@@ -74,6 +70,7 @@ void ExecutionEngine::runBatch(size_t iterations,
                                llvm::ArrayRef<Tensor *> inputs) {
   static size_t trainCounter = 0;
 
+  assert(function_ && "No function has been compiled");
   assert(!inputs.empty() && "No inputs");
   assert(inputs.size() == vars.size() &&
          "The number of inputs does not match the number of variables");
@@ -99,7 +96,7 @@ void ExecutionEngine::updateInputsAndRunNetwork(llvm::ArrayRef<Variable *> vars,
   }
 
   // Run the network.
-  backend_->doForwardPass();
+  function_->execute();
 }
 
 void ExecutionEngine::loadValueFromTensorSlice(Variable *v, Tensor *input,
@@ -128,7 +125,7 @@ std::unique_ptr<IRFunction> ExecutionEngine::generateIR(CompilationMode mode,
   // Verify the function pre-optimization/lowering.
   F->verify();
 
-  // Optimized the graph.
+  // Optimize the graph.
   ::glow::optimize(F, mode);
 
   // Allow the backend to transform the graph prior to lowering.
@@ -141,7 +138,7 @@ std::unique_ptr<IRFunction> ExecutionEngine::generateIR(CompilationMode mode,
   // Lower the graph into a sequence of low-level linear algebra operations.
   ::glow::lower(F, mode, *backend_);
 
-  // Optimized the graph again.
+  // Optimize the graph again.
   ::glow::optimize(F, mode);
 
   // Allow the backend to transform the graph after lowering.
@@ -172,12 +169,10 @@ std::unique_ptr<IRFunction> ExecutionEngine::generateIR(CompilationMode mode,
 }
 
 void ExecutionEngine::compile(CompilationMode mode, Function *F) {
-  reset();
-  backend_->init(generateIR(mode, F));
+  function_ = backend_->compile(generateIR(mode, F));
 }
 
 void ExecutionEngine::save(CompilationMode mode, Function *F,
                            llvm::StringRef outputDir) {
-  reset();
   backend_->save(generateIR(mode, F), outputDir);
 }

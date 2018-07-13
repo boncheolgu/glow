@@ -17,8 +17,10 @@
 #define GLOW_EXECUTIONENGINE_EXECUTIONENGINE_H
 
 #include "glow/Backends/Backend.h"
+#include "glow/Backends/CompiledFunction.h"
 #include "glow/Base/Train.h"
 #include "glow/Base/Traits.h"
+#include "glow/Graph/Graph.h"
 #include "glow/Optimizer/Optimizer.h"
 
 #include "llvm/ADT/ArrayRef.h"
@@ -28,27 +30,19 @@
 
 namespace glow {
 
-class Function;
-class Node;
-class Interpreter;
-class Variable;
-class Tensor;
-class Module;
-class Value;
-
 /// This is the ExecutionEngine. It owns the Graph, the IR, and the backends.
 /// The Graph, IR, etc in this class are defined as pointers, in order to
 /// erase the type and prevent the internal types from leaking out to the
 /// users of this class.
 class ExecutionEngine final {
   /// The Module that represents the high-level program.
-  std::unique_ptr<Module> M_;
+  Module M_;
   /// The network execution backend.
   std::unique_ptr<Backend> backend_;
+  /// A glow function compiled for this ExecutionEngine's backend.
+  std::unique_ptr<CompiledFunction> function_;
   /// The training configuration.
   TrainingConfig config_;
-  /// The kind of the backend being currently used.
-  BackendKind backendKind_;
 
   /// Optimize the graph, generate IR, and optimize the IR.
   std::unique_ptr<IRFunction> generateIR(CompilationMode mode, Function *F);
@@ -62,11 +56,8 @@ public:
   // using this backend.
   void setBackend(BackendKind backendKind);
 
-  /// Reset the execution engine.
-  void reset();
-
   /// \returns the internal graph.
-  Module &getModule() { return *M_; }
+  Module &getModule() { return M_; }
 
   /// \returns whether operation is supported by the underlying backend.
   bool isOpSupported(Kinded::Kind opKind, ElemKind elementTy) const {

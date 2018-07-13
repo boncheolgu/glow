@@ -24,12 +24,7 @@
 
 namespace glow {
 
-class Context;
 class IRFunction;
-class Value;
-class Tensor;
-class Variable;
-class Function;
 class Node;
 
 enum class BackendKind {
@@ -44,17 +39,15 @@ public:
   /// Dtor.
   virtual ~Backend() = default;
 
-  /// Prepare the interpreter for execution of new code.
-  virtual void init(std::unique_ptr<IRFunction> IR) = 0;
+  /// Generate code for input function \param IR.
+  virtual std::unique_ptr<CompiledFunction>
+  compile(std::unique_ptr<IRFunction> IR) const = 0;
 
   /// Save the bundle for a later standalone execution.
-  virtual void save(std::unique_ptr<IRFunction> IR, llvm::StringRef outputDir) {
+  virtual void save(std::unique_ptr<IRFunction> IR,
+                    llvm::StringRef outputDir) const {
     GLOW_UNREACHABLE("Saving a bundle is not supported by the backend");
   }
-
-  /// Perform a single forward scan of the network, interpreting all of the
-  /// instructions.
-  virtual void doForwardPass() = 0;
 
   /// @name Backend transform methods for different phases.
   /// These methods are called by the compiler before code generation and gives
@@ -63,10 +56,10 @@ public:
   /// cleaning up after itself.
   /// \returns True if the graph was modified.
   ///@{
-  virtual bool transformPreLowering(Function *F, CompilationMode mode) {
+  virtual bool transformPreLowering(Function *F, CompilationMode mode) const {
     return false;
   }
-  virtual bool transformPostLowering(Function *F, CompilationMode mode) {
+  virtual bool transformPostLowering(Function *F, CompilationMode mode) const {
     return false;
   }
   /// @}

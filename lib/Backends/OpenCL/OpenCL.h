@@ -34,8 +34,8 @@
 namespace glow {
 
 class IRFunction;
-class Backend;
 class OCLConvolutionInst;
+class Value;
 
 /// A helper struct with information about kernels launches.
 struct KernelLaunch {
@@ -98,7 +98,7 @@ public:
   ///@{
   ~OpenCLFunction() override;
 
-  void doForwardPass() override;
+  void execute() override;
   ///@}
 
 private:
@@ -161,10 +161,6 @@ private:
 
 /// This is the OpenCL backend.
 class OCLBackend final : public Backend {
-private:
-  /// Function containing state for execution.
-  std::unique_ptr<CompiledFunction> function_;
-
 public:
   /// Ctor.
   OCLBackend() = default;
@@ -174,11 +170,10 @@ public:
   ///@{
   ~OCLBackend() override = default;
 
-  void init(std::unique_ptr<IRFunction> IR) override;
+  std::unique_ptr<CompiledFunction>
+  compile(std::unique_ptr<IRFunction> IR) const override;
 
-  void doForwardPass() override;
-
-  bool transformPostLowering(Function *F, CompilationMode mode) override;
+  bool transformPostLowering(Function *F, CompilationMode mode) const override;
 
   bool isOpSupported(Kinded::Kind opKind, ElemKind elementTy) const override {
     if (elementTy == ElemKind::Int8QTy) {
