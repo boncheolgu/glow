@@ -317,8 +317,44 @@ Node *TFLiteLoader::create_node(const tflite::SubGraph *subgraph,
       nodeByName_.emplace(result_tensor->name()->c_str(), node);
       return node;
     }
-    case BuiltinOperator_RESHAPE:
-    case BuiltinOperator_SQUEEZE:
+    case BuiltinOperator_RESHAPE: {
+      // GLOW_ASSERT(op->inputs()->Length() == 1);
+      const auto input =
+          create_node(subgraph, out2op, tensor_index{op->inputs()->Get(0)});
+
+      const auto options = op->builtin_options_as_ReshapeOptions();
+
+      vector<size_t> new_shape;
+      for (auto s : *options->new_shape()) {
+        new_shape.push_back(s);
+      }
+
+      auto node =
+          G_.createReshape("reshape" + to_string(static_cast<int32_t>(*op_id)),
+                           input, new_shape);
+
+      nodeByName_.emplace(result_tensor->name()->c_str(), node);
+      return node;
+    }
+    case BuiltinOperator_SQUEEZE: {
+      GLOW_ASSERT(op->inputs()->Length() == 1);
+      const auto input =
+          create_node(subgraph, out2op, tensor_index{op->inputs()->Get(0)});
+
+      const auto options = op->builtin_options_as_SqueezeOptions();
+
+      vector<size_t> squeeze_dims;
+      for (auto s : *options->squeeze_dims()) {
+        squeeze_dims.push_back(s);
+      }
+
+      auto node =
+          G_.createSqueeze("sqeeze" + to_string(static_cast<int32_t>(*op_id)),
+                           input, squeeze_dims);
+
+      nodeByName_.emplace(result_tensor->name()->c_str(), node);
+      return node;
+    }
     case BuiltinOperator_SOFTMAX: {
       // GLOW_ASSERT(op->inputs()->Length() == 1);
       llvm::errs() << EnumNameBuiltinOperator(builtin_code) << " ignored.\n";
