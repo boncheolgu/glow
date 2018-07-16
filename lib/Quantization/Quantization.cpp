@@ -64,7 +64,7 @@ quantizeInputs(Function *F, Node *node,
   llvm::SmallVector<NodeValue, 6> quantizedInputs;
 
   for (unsigned i = 0, e = node->getNumInputs(); i < e; ++i) {
-    NodeValue &NV = node->getNthInput(i);
+    auto NV = node->getNthInput(i);
 
     // Do not quantize non floating point type, e.g., Index type.
     if (NV.getElementType() != ElemKind::FloatTy) {
@@ -160,10 +160,10 @@ static Node *quantizeNode(Function *F, Node *node,
     assert(quantizedInputs.size() == 1 && "Invalid number of inputs");
     assert(qParams.size() == 1 && "Invalid number of quantized outputs");
 
-    auto QT = F->getParent()->uniqueType(
-        ElemKind::Int8QTy, S->getResult().dims(),
-        quantizedInputs[0]->getNthResult(0).getType()->getScale(),
-        quantizedInputs[0]->getNthResult(0).getType()->getOffset());
+    auto QT =
+        F->getParent()->uniqueType(ElemKind::Int8QTy, S->getResult().dims(),
+                                   quantizedInputs[0].getType()->getScale(),
+                                   quantizedInputs[0].getType()->getOffset());
 
     quantizedNode =
         F->createSlice(S->getName(), quantizedInputs[0], S->getStart(), QT);
